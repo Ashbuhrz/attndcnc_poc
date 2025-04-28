@@ -1,16 +1,21 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:poclocationupdate/helloworld.dart';
 
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_background_geolocation/flutter_background_geolocation.dart'
+    as bg;
 import 'package:background_fetch/background_fetch.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 
-Future<dynamic> appGet(url) async {
+Future<dynamic> appPost(url, body) async {
   try {
-    var url2 = Uri.parse(url);
-    final response = await http.get(
+    var url2 = Uri.parse("http://172.21.29.215:3001/api/test");
+    final msg = jsonEncode(body);
+    final response = await http.post(
       url2,
       headers: {'Content-Type': 'application/json'},
+      body: msg,
     );
     return response;
   } catch (e) {
@@ -19,47 +24,168 @@ Future<dynamic> appGet(url) async {
   }
 }
 
-// [Android-only] This "Headless Task" is run when the Android app is terminated with `enableHeadless: true`
-// Be sure to annotate your callback function to avoid issues in release mode on Flutter >= 3.3.0
+/// Receive events from BackgroundGeolocation in Headless state.
+@pragma('vm:entry-point')
+void backgroundGeolocationHeadlessTask(bg.HeadlessEvent headlessEvent) async {
+  print('📬 --> $headlessEvent');
+
+  switch (headlessEvent.name) {
+    case bg.Event.BOOT:
+      bg.State state = await bg.BackgroundGeolocation.state;
+      print("📬 didDeviceReboot: ${state.didDeviceReboot}");
+      break;
+    case bg.Event.TERMINATE:
+      bg.State state = await bg.BackgroundGeolocation.state;
+      if (state.stopOnTerminate!) {
+        // Don't request getCurrentPosition when stopOnTerminate: true
+        return;
+      }
+      try {
+        bg.Location location = await bg
+            .BackgroundGeolocation.getCurrentPosition(
+          samples: 1,
+          persist: true,
+          extras: {"event": "terminate", "headless": true},
+        );
+        print("[getCurrentPosition] Headless: $location");
+      } catch (error) {
+        print("[getCurrentPosition] Headless ERROR: $error");
+      }
+
+      break;
+    case bg.Event.HEARTBEAT:
+      try {
+        bg.Location location = await bg
+            .BackgroundGeolocation.getCurrentPosition(
+          samples: 2,
+          timeout: 10,
+          extras: {"event": "heartbeat", "headless": true},
+        );
+
+        print('[getCurrentPosition] Headless: $location');
+        String sssss =
+            "lat : ${location.coords.latitude} | lng : ${location.coords.longitude} ";
+        print("SSSSSS: $sssss");
+        await appPost("url", {"location": sssss});
+      } catch (error) {
+        print('[getCurrentPosition] Headless ERROR: $error');
+      }
+      break;
+    case bg.Event.LOCATION:
+      bg.Location location = headlessEvent.event;
+      print(location);
+      break;
+    case bg.Event.MOTIONCHANGE:
+      bg.Location location = headlessEvent.event;
+      print(location);
+      break;
+    case bg.Event.GEOFENCE:
+      bg.GeofenceEvent geofenceEvent = headlessEvent.event;
+      print(geofenceEvent);
+      break;
+    case bg.Event.GEOFENCESCHANGE:
+      bg.GeofencesChangeEvent event = headlessEvent.event;
+      print(event);
+      break;
+    case bg.Event.SCHEDULE:
+      bg.State state = headlessEvent.event;
+      print(state);
+      break;
+    case bg.Event.ACTIVITYCHANGE:
+      bg.ActivityChangeEvent event = headlessEvent.event;
+      print(event);
+      break;
+    case bg.Event.HTTP:
+      bg.HttpEvent response = headlessEvent.event;
+      print(response);
+      break;
+    case bg.Event.POWERSAVECHANGE:
+      bool enabled = headlessEvent.event;
+      print(enabled);
+      break;
+    case bg.Event.CONNECTIVITYCHANGE:
+      bg.ConnectivityChangeEvent event = headlessEvent.event;
+      print(event);
+      break;
+    case bg.Event.ENABLEDCHANGE:
+      bool enabled = headlessEvent.event;
+      print(enabled);
+      break;
+    case bg.Event.AUTHORIZATION:
+      bg.AuthorizationEvent event = headlessEvent.event;
+      print(event);
+      bg.BackgroundGeolocation.setConfig(
+        bg.Config(url: "http://localhost:3001/api/test"),
+      );
+      break;
+  }
+}
+
+/// Receive events from BackgroundFetch in Headless state.
 @pragma('vm:entry-point')
 void backgroundFetchHeadlessTask(HeadlessTask task) async {
   String taskId = task.taskId;
-  bool isTimeout = task.timeout;
-  if (isTimeout) {
-    // This task has exceeded its allowed running-time.
-    // You must stop what you're doing and immediately .finish(taskId)
-    print("[BackgroundFetch] Headless task timed-out: $taskId");
+
+  // Is this a background_fetch timeout event?  If so, simply #finish and bail-out.
+  if (task.timeout) {
+    print("[BackgroundFetch] HeadlessTask TIMEOUT: $taskId");
     BackgroundFetch.finish(taskId);
     return;
   }
-  print('[BackgroundFetch] Headless event received.');
-  // Do your work here...
-  var testResponse = await appGet('http://172.21.29.215:3001/api/test');
-  print("testResponse background fetch");
-  print(testResponse);
 
-  if (taskId == 'flutter_background_fetch') {
-    BackgroundFetch.scheduleTask(
-      TaskConfig(
-        taskId: "com.transistorsoft.customtask",
-        delay: 5000,
-        periodic: false,
-        forceAlarmManager: false,
-        stopOnTerminate: false,
-        enableHeadless: true,
-      ),
+  print("[BackgroundFetch] HeadlessTask: $taskId");
+
+  try {
+    var location = await bg.BackgroundGeolocation.getCurrentPosition(
+      samples: 2,
+      extras: {"event": "background-fetch", "headless": true},
     );
+    print("[location] $location");
+  } catch (error) {
+    print("[location] ERROR: $error");
   }
+
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  int count = 0;
+  if (prefs.get("fetch-count") != null) {
+    count = prefs.getInt("fetch-count")!;
+  }
+  prefs.setInt("fetch-count", ++count);
+  print('[BackgroundFetch] count: $count');
+
   BackgroundFetch.finish(taskId);
 }
 
 void main() {
-  // Enable integration testing with the Flutter Driver extension.
-  // See https://flutter.io/testing/ for more info.
-  runApp(new MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
 
-  // Register to receive BackgroundFetch events after app is terminated.
-  // Requires {stopOnTerminate: false, enableHeadless: true}
+  /// Application selection:  Select the app to boot:
+  /// - AdvancedApp
+  /// - HelloWorldAp
+  /// - HomeApp
+  ///
+  SharedPreferences.getInstance().then((SharedPreferences prefs) {
+    String? appName = prefs.getString("app");
+
+    // Sanitize old-style registration system that only required username.
+    // If we find a valid username but null orgname, reverse them.
+    String? orgname = prefs.getString("orgname");
+    String? username = prefs.getString("username");
+
+    if (orgname == null && username != null) {
+      prefs.setString("orgname", username);
+      prefs.remove("username");
+    }
+
+    runApp(new HelloWorldApp());
+  });
+
+  /// Register BackgroundGeolocation headless-task.
+  bg.BackgroundGeolocation.registerHeadlessTask(
+    backgroundGeolocationHeadlessTask,
+  );
+
+  /// Register BackgroundFetch headless-task.
   BackgroundFetch.registerHeadlessTask(backgroundFetchHeadlessTask);
 }
 
@@ -122,35 +248,9 @@ class _MyAppState extends State<MyApp> {
     if (!mounted) return;
   }
 
-  void _onClickEnable(enabled) {
-    setState(() {
-      _enabled = enabled;
-    });
-    if (enabled) {
-      BackgroundFetch.start()
-          .then((int status) {
-            print('[BackgroundFetch] start success: $status');
-          })
-          .catchError((e) {
-            print('[BackgroundFetch] start FAILURE: $e');
-          });
-    } else {
-      BackgroundFetch.stop().then((int status) {
-        print('[BackgroundFetch] stop success: $status');
-      });
-    }
-  }
+  void _onClickEnable(enabled) {}
 
-  void _onClickStatus() async {
-    // var testResponse = await appGet('http://172.21.29.215:3001/api/test');
-    // print("testResponse background fetch 7777");
-    // print(testResponse);
-    int status = await BackgroundFetch.status;
-    print('[BackgroundFetch] status: $status');
-    setState(() {
-      _status = status;
-    });
-  }
+  void _onClickStatus() async {}
 
   @override
   Widget build(BuildContext context) {
