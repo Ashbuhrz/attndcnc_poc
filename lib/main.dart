@@ -7,10 +7,13 @@ import 'package:flutter_background_geolocation/flutter_background_geolocation.da
 import 'package:background_fetch/background_fetch.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
 
 Future<dynamic> appPost(url, body) async {
   try {
-    var url2 = Uri.parse("http://172.21.29.215:3001/api/test");
+    var url2 = Uri.parse("http://172.20.10.3:3001/api/test");
+    // var url2 = Uri.parse("https://d530-83-110-72-198.ngrok-free.app/api/test");
+    print("URL: ${url2}");
     final msg = jsonEncode(body);
     final response = await http.post(
       url2,
@@ -141,6 +144,10 @@ void backgroundFetchHeadlessTask(HeadlessTask task) async {
       extras: {"event": "background-fetch", "headless": true},
     );
     print("[location] $location");
+    String sssss =
+        "lat : ${location.coords.latitude} | lng : ${location.coords.longitude} ";
+    print("SSSSSS: $sssss");
+    await appPost("url", {"location": sssss, "from": "here1"});
   } catch (error) {
     print("[location] ERROR: $error");
   }
@@ -157,6 +164,7 @@ void backgroundFetchHeadlessTask(HeadlessTask task) async {
 }
 
 void main() {
+  // HttpOverrides.global = MyHttpOverrides();
   WidgetsFlutterBinding.ensureInitialized();
 
   /// Application selection:  Select the app to boot:
@@ -304,5 +312,14 @@ class _MyAppState extends State<MyApp> {
         ),
       ),
     );
+  }
+}
+
+class MyHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    return super.createHttpClient(context)
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
   }
 }
